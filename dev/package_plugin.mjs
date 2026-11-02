@@ -44,7 +44,7 @@ export function problems() {
     if (typeof manifest.$schema !== 'string' || !manifest.$schema.startsWith('https://agent-plugins.org/schemas/')) found.push('plugin.json: needs the Agent Plugins $schema');
     const entries = (readJson(MARKETPLACE).plugins ?? []).filter(p => p.name === manifest.name);
     if (entries.length !== 1 || entries[0].source?.path !== './plugins/audit-auto') found.push('marketplace.json does not point at plugins/audit-auto');
-    // lark-agent runs the hourly rules sync from lark-agent.json (see its src/jobs.ts).
+    // lark-agent runs the daily rules sync from lark-agent.json (see its src/jobs.ts).
     const jobs = readJson(path.join(PLUGIN, 'lark-agent.json')).jobs ?? [];
     const sync = jobs.find(j => j.name === 'rules-sync');
     if (!sync || !Number.isInteger(sync.everyMinutes) || sync.everyMinutes < 5 || sync.command !== 'node' || sync.args?.[0] !== '${PLUGIN_ROOT}/server/dist/audit.mjs') found.push('lark-agent.json: rules-sync must run node ${PLUGIN_ROOT}/server/dist/audit.mjs every 5 minutes or more');

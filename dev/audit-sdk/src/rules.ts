@@ -11,7 +11,7 @@ import { chunks, day, entriesOf, entryOf, renderChunk, stamp, type Entry, type E
 
 /*
  * The dynamic spec: review rules that come out of a project's review groups. Someone @-mentions the bot in a group with
- * 「监听本群更新审片规范」 (watch); from then on the group's messages are read (the history once, then every hour what is new, see
+ * 「监听本群更新审片规范」 (watch); from then on the group's messages are read (the history once, then once a day what is new, see
  * lark-agent.json) and Gemini turns the rulings in them into changes of the project's dynamic spec: add, update or remove a rule. Each
  * rule keeps the messages it rests on. The reviews of the project apply it together with the fixed spec.
  *
@@ -19,7 +19,7 @@ import { chunks, day, entriesOf, entryOf, renderChunk, stamp, type Entry, type E
  *   groups.json      the groups listened to: project, from when, how far they have been read
  *   rules/<P>.json   the dynamic spec of project P, and rules/<P>.md, the same for people
  *   names.json       members' display names, looked up once
- *   lock             one writer at a time (a user's watch and the hourly sync)
+ *   lock             one writer at a time (a user's watch and the daily sync)
  */
 
 /** The parts of a spec a rule belongs to: the sections of the fixed specs. */
@@ -173,7 +173,7 @@ export function promptRules(book: Book): string {
 export function renderBook(book: Book): string {
   const lines = [
     `# ${book.project} 动态审片规范`, '',
-    '从审核群的聊天记录自动整理：机器人每小时读一次群里的新消息，有新的审核结论就更新这里。审片时和固定规范一起用；说法和固定规范不一样的，以这里为准（这里更新）。', '',
+    '从审核群的聊天记录自动整理：机器人每天读一次群里的新消息，有新的审核结论就更新这里。审片时和固定规范一起用；说法和固定规范不一样的，以这里为准（这里更新）。', '',
     `更新于 ${book.updated ? stamp(book.updated) : '—'} · 共 ${book.rules.length} 条`,
   ];
   if (!book.rules.length) lines.push('', '（还没有整理出规范）');
@@ -495,7 +495,7 @@ function advance(group: Group, read: Pick<Entry, 'id' | 'at'>[]) {
 
 const summary = (r: GroupSync) => ({ project: r.project, read: r.read, considered: r.considered, added: r.added.length, updated: r.updated.length,
   removed: r.removed.length, pending: r.pending, ...(r.error ? { error: r.error } : {}) });
-/** How long a user's watch reads before answering (the rest is read by the hourly sync), and how long the hourly sync reads (the job is ended at 30). */
+/** How long a user's watch reads before answering (the rest is read by the daily sync), and how long the daily sync reads (the job is ended at 30). */
 const WATCH_MINUTES = 15;
 const SYNC_MINUTES = 20;
 
@@ -540,7 +540,7 @@ export async function unwatch(turn: Turn, ctx: Pick<RulesContext, 'shared'>): Pr
   });
 }
 
-/** Reads what is new in every group listened to (or in one), the hourly job. `waitMs` 0: give up at once when another holds the lock. */
+/** Reads what is new in every group listened to (or in one), the daily job. `waitMs` 0: give up at once when another holds the lock. */
 export async function syncAll(ctx: RulesContext, options: { chat?: string; waitMs?: number } = {}): Promise<Record<string, unknown>> {
   return withLock(ctx.shared, async () => {
     const groups = loadGroups(ctx.shared);

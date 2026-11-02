@@ -112,7 +112,7 @@ test('listening to a group: refused outside a group; the history of 180 days is 
   assert.equal(saved.watchedBy, 'ou_alice');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(shared, 'names.json'), 'utf8')), { ou_alice: '王审核', ou_bob: '李剪辑' });
 
-  // Then every hour: only what is new is read, and it may change the rules made before.
+  // Then at the next sync: only what is new is read, and it may change the rules made before.
   lark.messages.push(message(NOW + 60_000, { text: '更正：「上头」在剧情台词里也不行，另外 BOSS 可以写成首领' }, { parent_id: lark.messages[1]!.message_id }));
   model.answer = () => ({ operations: [{ op: 'update', id: 'D1', rule: '「上头」算防沉迷，字幕、口播、剧情台词都不能写', messages: ['#2'] }, { op: 'add', category: '字幕和口播', rule: 'BOSS 写成首领', messages: [2] }] });
   const hourly = await syncAll({ ...ctx, now: () => NOW + 3_600_000 });
@@ -167,7 +167,7 @@ test('the command line: watch, status, show, remove and unwatch, as the host run
   assert.match(String((await run('rules', 'nope')).result.reason), /rules 需要/);
 });
 
-test('one writer at a time: the hourly job gives way to a reading in progress, a dead holder\'s lock is taken over', async () => {
+test('one writer at a time: the daily job gives way to a reading in progress, a dead holder\'s lock is taken over', async () => {
   const { shared, lark } = setup();
   const model = new FakeModel(() => ({ operations: [] }));
   const env = { LARK_AGENT_SHARED_DIR: path.dirname(shared) };

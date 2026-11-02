@@ -18,7 +18,7 @@ import { Busy, loadBook, removeRules, show, status, syncAll, unwatch, watch, typ
  *   review --project GOF|GOT --file <path> [--file <path>]… [--note <text>]   review videos / images (zips are unpacked)
  *   rules watch --project GOF|GOT [--since YYYY-MM-DD]                         listen to this turn's group, reading its history now
  *   rules unwatch                                                              stop listening to this turn's group
- *   rules sync [--here]                                                        read what is new in every group (or this one); the hourly job
+ *   rules sync [--here]                                                        read what is new in every group (or this one); the daily job
  *   rules status                                                               the groups listened to, rules per project
  *   rules show --project GOF|GOT [--output <file.md>]                          the dynamic spec as Markdown: a file for the user, or in the answer
  *   rules remove --project GOF|GOT --id D<n> [--id D<n>]…                      take rules out of the dynamic spec
@@ -130,7 +130,7 @@ async function rulesCommand(action: string | undefined, args: string[], ctx: Con
       try {
         return await syncAll(rulesContext(ctx), { ...(values.here ? { chat: turn.chat ?? '' } : {}), waitMs: turn.chat ? 5 * 60_000 : 0 });
       } catch (error) {
-        // The hourly job finding a user's watch (or the previous run) still at work: nothing is lost, the next run reads on from there.
+        // The daily job finding a user's watch (or the previous run) still at work: nothing is lost, the next run reads on from there.
         if (error instanceof Busy && !turn.chat) return { status: 'busy', reason: error.message };
         throw error;
       }

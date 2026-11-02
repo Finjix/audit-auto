@@ -8,7 +8,7 @@ AI 审片插件（Codex 插件，给 [lark-agent](https://github.com/Finjix/lark
 |---|---|
 | `gof-audit` | GOF（无尽冬日）审片。固定规范在 `skills/gof-audit/references/rules.md`，取自《无尽冬日 广告素材审核标准（2026-10 版）》 |
 | `got-audit` | GOT 审片。固定规范还没有，`rules.md` 是占位，只用动态规范；动态规范也是空的时候拒绝审，并告诉用户先去审核群开始监听 |
-| `dynamic-rules` | 动态规范。在业务群里 @机器人「监听本群更新审片规范」，机器人读群里最近 180 天的聊天，把审核结论整理成该项目的动态规范；之后每小时读一次新消息，新增、修改或撤回规范。也能停止监听、立即更新、查看规范、列出监听的群、删错的规则 |
+| `dynamic-rules` | 动态规范。在业务群里 @机器人「监听本群更新审片规范」，机器人读群里最近 180 天的聊天，把审核结论整理成该项目的动态规范；之后每天读一次新消息，新增、修改或撤回规范。也能停止监听、立即更新、查看规范、列出监听的群、删错的规则 |
 
 审片时固定规范和动态规范一起用，两者冲突时以动态规范为准（更新）。
 
@@ -18,7 +18,7 @@ AI 审片插件（Codex 插件，给 [lark-agent](https://github.com/Finjix/lark
 .agents/plugins/marketplace.json     本仓库就是一个 marketplace（名字 audit-auto）
 plugins/audit-auto/                  插件本体，安装和打包的就是这个目录
   plugin.json                        插件清单（Agent Plugins 1.0.0）
-  lark-agent.json                    lark-agent 的定时任务：每 60 分钟 rules sync
+  lark-agent.json                    lark-agent 的定时任务：每天（1440 分钟）rules sync
   server/dist/audit.mjs              命令行的打包产物（含 Google Gen AI SDK，提交入库，装好即用）
   skills/gof-audit/                  技能 + references/rules.md（GOF 固定规范）
   skills/got-audit/                  技能 + references/rules.md（占位）
@@ -61,7 +61,7 @@ docs/lark-agent-integration.md       放进 lark-agent
 - **话题**：飞书把话题（thread）里的回复只列在话题里、不列在群消息里，所以每个群记着它的话题：从话题首条被读到起，每次都去话题里读上次之后的新回复，话题 14 天没有新回复就不再跟。某个话题这次读不到，它的进度不动，下次再读。
 - **整理**：每段（约 4 万字、最多 24 张图、图片合计不超过 16 MB）调一次 Gemini，模型看到固定规范、当前的动态规范和这段聊天，给出操作：新增、修改、撤回，每个操作都要指明依据的消息。每段做完就保存，失败了下次从断点接着读。网关暂时不可用（5xx、限流、超时、连不上）就原样等下次；别的失败（模型拒收某张图、回答不完整）先去掉图片再试一次，同一段连续 3 次都失败就跳过它，记在 `rules status` 的 `skipped` 里，群照常往下读。
 - **时间**：用户开始监听时最多读 15 分钟就回复（没读完的 `pending`，交给定时任务接着读）；定时任务每次最多读 20 分钟（lark-agent 30 分钟就结束它），最久没读的群先读；每个群一次最多 40 段。
-- **之后**：lark-agent 每 60 分钟跑一次 `rules sync`（`lark-agent.json`），读每个群上次之后的新消息和跟着的话题。没有新消息就不调模型。所有群都读失败时退出码 2（日志记「插件定时任务失败」）。
+- **之后**：lark-agent 每天跑一次 `rules sync`（`lark-agent.json`，`everyMinutes` 1440：服务启动后不久先跑一次，之后每 24 小时一次，不是固定钟点；想马上更新就 @机器人「现在更新一下规范」），读每个群上次之后的新消息和跟着的话题。没有新消息就不调模型。所有群都读失败时退出码 2（日志记「插件定时任务失败」）。
 - **存放**：`shared/audit-auto/`（lark-agent 的 `LARK_AGENT_SHARED_DIR`，所有用户共用，不清理、不发送）：`groups.json`（监听的群、读到哪了、跟着的话题、跳过的段）、`rules/<项目>.json` 和 `rules/<项目>.md`（动态规范）、`names.json`（成员名字）、`lock`（同一时间只有一个进程改规范，锁里有持有者的随机令牌，续期和释放只动自己的锁；持有者死了或 10 分钟没续期就被接管；定时任务碰到别人持有就跳过这一次）。
 - **规范的样子**：每条规范有编号（D1、D2…，不复用）、分类（和固定规范的章节一致）、规则、怎么改、例子、依据（哪天谁说的）。撤回的和用户删掉的也留着记录。
 
@@ -92,13 +92,13 @@ docs/lark-agent-integration.md       放进 lark-agent
 | `im:message:readonly` | 下载消息里的图片 | 已有 |
 | `contact:user.base:readonly` | 发言人的名字 | 已有 |
 
-缺权限时 `rules watch` 会照样登记这个群，并告诉用户缺哪个权限（管理员开通、发布新版本后，下一小时自动重试）。机器人被移出群也会如实说明。
+缺权限时 `rules watch` 会照样登记这个群，并告诉用户缺哪个权限（管理员开通、发布新版本后，下一次每天的读取时自动重试）。机器人被移出群也会如实说明。
 
 ## 规范怎么维护
 
 - **GOF 固定规范**：`skills/gof-audit/references/rules.md`，从飞书文档整理（内容照原文逐条列出；原文的示例图片没带过来，上传送审流程看素材查不了没收录；第六节加了一条「审片不查编号大小」）。标准出新版就照新版改这个文件，重新打包、部署。
 - **GOT 固定规范**：`skills/got-audit/references/rules.md` 第一行是 `<!-- audit-auto: placeholder -->`，有这行就只用动态规范。定下来以后删掉这行，照 GOF 的写法写规范。
-- **动态规范**：靠群里的聊天。规则错了，在群里说清楚（下一小时更新），或让机器人删掉（`rules remove`）。
+- **动态规范**：靠群里的聊天。规则错了，在群里说清楚（下一次每天的读取时更新，或 @机器人「现在更新一下规范」），或让机器人删掉（`rules remove`）。
 
 ## 安装
 

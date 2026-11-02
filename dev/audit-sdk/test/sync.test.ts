@@ -91,7 +91,7 @@ test('a chunk the model keeps refusing goes once more without its pictures, and 
   assert.equal(down.calls.length, 4, 'one call a reading: no picture to leave out');
 });
 
-test('the hourly sync reads the group read longest ago first, stops starting calls when its time is up, and fails when every group fails', async () => {
+test('the daily sync reads the group read longest ago first, stops starting calls when its time is up, and fails when every group fails', async () => {
   const { shared, lark, model, ctx } = setup();
   lark.messages.push(message(NOW - DAY, { text: '「上头」不能写' }));
   await watch(PROJECTS.GOF, undefined, group, ctx);

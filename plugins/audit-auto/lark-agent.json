@@ -1,1 +1,1 @@
-{"jobs":[{"name":"rules-sync","everyMinutes":60,"timeoutMinutes":30,"command":"node","args":["${PLUGIN_ROOT}/server/dist/audit.mjs","rules","sync"]}]}
+{"jobs":[{"name":"rules-sync","everyMinutes":1440,"timeoutMinutes":30,"command":"node","args":["${PLUGIN_ROOT}/server/dist/audit.mjs","rules","sync"]}]}
