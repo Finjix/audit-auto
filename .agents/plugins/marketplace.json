@@ -1,0 +1,20 @@
+{
+  "name": "audit-auto",
+  "interface": {
+    "displayName": "audit-auto"
+  },
+  "plugins": [
+    {
+      "name": "audit-auto",
+      "source": {
+        "source": "local",
+        "path": "./plugins/audit-auto"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

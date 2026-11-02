@@ -1,0 +1,23 @@
+{
+  "name": "audit-auto-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Source of the audit-auto plugin: ad material reviewed by Gemini through the internal AI gateway against each project's fixed spec and the dynamic spec built from its review groups' chat. Bundled, with the Google Gen AI SDK, into plugins/audit-auto/server/dist/audit.mjs.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node build.mjs",
+    "test": "npm run typecheck && npm run build && node --test test/*.test.ts && node ../package_plugin.mjs --check"
+  },
+  "dependencies": {
+    "@google/genai": "2.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

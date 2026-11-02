@@ -1,0 +1,6 @@
+interface:
+  display_name: "动态审片规范"
+  short_description: "在审核群里 @机器人「监听本群更新审片规范」：读群聊天整理出动态规范，之后每小时更新；也能查看、停止监听、删错的规则"
+  default_prompt: "Use $dynamic-rules to start listening to this group and keep the review spec up to date from its chat."
+policy:
+  allow_implicit_invocation: true

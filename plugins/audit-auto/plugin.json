@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "audit-auto",
+  "version": "2.0.0",
+  "description": "AI 审片：用户发来广告视频（或图片、zip），说明是 GOF 还是 GOT 的素材（没说就先问），用 Gemini（内部 AI 网关，gemini-3.8-flash）按该项目的审片规范逐秒审，返回问题列表（位置 / 问题 / 怎么改）。规范分两层：固定规范（GOF 取自《无尽冬日 广告素材审核标准》，GOT 暂缺、先占位）和动态规范（在业务群里 @机器人「监听本群更新审片规范」后，机器人读群聊天整理出规范，之后每小时读一次新消息更新）。三个技能：gof-audit、got-audit、dynamic-rules。",
+  "keywords": ["feishu", "lark", "audit", "review", "ad", "video", "gemini", "gof", "got"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AI 审片",
+        "shortDescription": "按 GOF / GOT 的审片规范审广告视频，返回位置 / 问题 / 怎么改；审核群聊天自动整理成动态规范",
+        "longDescription": "审片（gof-audit、got-audit）：用户发来视频、图片或 zip，并说明是哪个项目的素材（没说就先问 GOF 还是 GOT），Gemini（内部 AI 网关的 gemini-3.8-flash，思考强度 medium）看完整条视频、听完整条音轨，先逐字记下字幕和口播，再对照该项目的固定规范和动态规范找出问题，按时间顺序列出每处的位置、问题、怎么改，标出红线和需确认的地方。大视频在有 ffmpeg 的电脑上先压到 720p 再发，审得更快。动态规范（dynamic-rules）：把机器人拉进项目的审核群，@机器人 说「监听本群更新审片规范」，机器人读群里最近 180 天的聊天（拒审截图也看），把审核结论整理成动态规范，之后每小时读一次新消息，新增、修改或撤回规范；审片时固定规范和动态规范一起用，冲突时以较新的动态规范为准。GOT 还没有固定规范，正式使用前要先在 GOT 的审核群里开始监听。",
+        "developerName": "audit-auto",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": [
+          "Use $gof-audit to review this GOF ad video and list every problem with 位置 / 问题 / 怎么改.",
+          "Use $got-audit to review this GOT ad video and list every problem with 位置 / 问题 / 怎么改.",
+          "Use $dynamic-rules to start listening to this group and keep the review spec up to date from its chat."
+        ]
+      }
+    }
+  }
+}

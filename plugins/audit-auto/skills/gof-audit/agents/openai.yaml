@@ -1,0 +1,6 @@
+interface:
+  display_name: "GOF 审片"
+  short_description: "按 GOF（无尽冬日）的审片规范审广告视频、图片，逐条给出位置 / 问题 / 怎么改"
+  default_prompt: "Use $gof-audit to review this GOF ad video and list every problem with 位置 / 问题 / 怎么改."
+policy:
+  allow_implicit_invocation: true
