@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Part } from '@google/genai';
 import type { Turn } from './config.ts';
 import { Blocked, need } from './errors.ts';
-import { GatewayDown, GatewayRefused, type Model } from './gemini.ts';
+import { GatewayDown, GatewayRefused, type Model, type Part } from './gemini.ts';
 import { explainLark, type FeishuMessage, type Lark } from './lark.ts';
 import { fixedSpec, projectOf, PROJECTS, type Project } from './projects.ts';
 import { chunks, day, entriesOf, entryOf, renderChunk, stamp, type Entry, type EntryContext } from './transcript.ts';

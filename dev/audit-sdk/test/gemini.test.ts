@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MediaResolution } from '@google/genai';
 import { GatewayDown, GatewayRefused, gatewayModel } from '../src/gemini.ts';
 
 const GATEWAY = { baseUrl: 'https://lumos.diandian.info/winky/gemini', apiVersion: 'v1', model: 'gemini-3.8-flash', thinkingLevel: 'MEDIUM', key: 'sk-test-key-123' };
@@ -24,7 +23,7 @@ function gateway(replies: (() => Response)[]) {
 test('a call goes to the gateway\'s generateContent with the key, medium thinking, the schema and no safety filtering', async () => {
   const { model, sent } = gateway([() => answer('{"ok":true}')]);
   const reply = await model.json({ system: 'Review.', parts: [{ inlineData: { mimeType: 'video/mp4', data: 'AAAA' }, videoMetadata: { fps: 4 } }, { text: 'File name: a.mp4' }],
-    mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH });
+    mediaResolution: 'MEDIA_RESOLUTION_HIGH' });
   assert.deepEqual(reply.data, { ok: true }, 'the thought is not part of the answer');
   assert.deepEqual(reply.usage, { input: 10, output: 2, thoughts: 5 });
   const [call] = sent;

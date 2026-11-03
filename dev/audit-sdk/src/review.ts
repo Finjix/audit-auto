@@ -1,8 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { MediaResolution, type Part } from '@google/genai';
 import { Blocked, messageOf, need } from './errors.ts';
-import type { Model, Usage } from './gemini.ts';
+import type { Model, Part, Usage } from './gemini.ts';
 import { MB, prepare, refusal, type Prepared } from './media.ts';
 import { fixedSpec, type Project } from './projects.ts';
 import { loadBook, promptRules } from './rules.ts';
@@ -194,7 +193,7 @@ export async function reviewOne(material: Material, project: Project, system: st
   const base = { name: material.name, media: media.kind, ...(media.duration ? { duration: media.duration } : {}), ...(media.orientation ? { orientation: media.orientation } : {}),
     compressed: media.compressed, ...(media.warning ? { warning: media.warning } : {}) };
   try {
-    const reply = await ctx.model.json({ system, parts, mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH, maxOutputTokens: 32_768 });
+    const reply = await ctx.model.json({ system, parts, mediaResolution: 'MEDIA_RESOLUTION_HIGH', maxOutputTokens: 32_768 });
     const findings = normalize(reply.data);
     return { ...base, status: 'reviewed', findings, verdict: verdictOf(findings.issues), ms: Date.now() - started, usage: reply.usage };
   } catch (error) {

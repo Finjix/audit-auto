@@ -143,5 +143,4 @@ npm test                               # 类型检查 → 打包到 plugins/audi
 | 依赖 | 版本 |
 |---|---|
 | Node.js（系统） | ≥ 24 |
-| @google/genai | 2.32.0（已打包进 `server/dist`） |
 | esbuild / TypeScript / @types/node（开发） | 0.28.2 / 7.0.2 / 24.19.2 |
