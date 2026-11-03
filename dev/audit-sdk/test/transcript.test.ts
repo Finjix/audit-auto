@@ -61,6 +61,8 @@ test('the transcript numbers messages, says which one a reply answers and labels
     '#4 [2026-10-30 14:08] 王审核（回复更早的消息）: 再说一次',
     '    ↳ #5 [2026-10-30 14:09] 成员: 转来的',
   ].join('\n'));
+  // Told which pictures go with it, the transcript says of the others that they did not come along, instead of labelling an image that never follows.
+  assert.match(renderChunk(entries, new Map(), new Set(), new Set(['1-2'])), /^#1 .*: 这条被拒了 \[图片（没能附上）\] \[图片 #1-2\]$/m);
   assert.equal(stamp(Date.parse('2026-11-02T16:30:00Z')), '2026-11-03 00:30');
 });
 

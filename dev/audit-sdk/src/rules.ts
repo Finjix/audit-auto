@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Part } from '@google/genai';
 import type { Turn } from './config.ts';
 import { Blocked, need } from './errors.ts';
-import { GatewayDown, type Model } from './gemini.ts';
+import { GatewayDown, GatewayRefused, type Model } from './gemini.ts';
 import { explainLark, type FeishuMessage, type Lark } from './lark.ts';
 import { fixedSpec, projectOf, PROJECTS, type Project } from './projects.ts';
 import { chunks, day, entriesOf, entryOf, renderChunk, stamp, type Entry, type EntryContext } from './transcript.ts';
@@ -87,12 +87,23 @@ function readJson<T>(file: string, fallback: T): T {
   }
 }
 
-/** Written whole or not at all: a reader never sees half a file. */
+/**
+ * Written whole or not at all: a reader never sees half a file. On Windows a program that has the file open (a virus scanner, say) can
+ * refuse the replacement for a moment, so it is tried again for a few seconds.
+ */
 function writeAtomic(file: string, content: string) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, content, 'utf8');
-  fs.renameSync(temp, file);
+  for (let attempt = 1; ; attempt++) {
+    try { fs.renameSync(temp, file); return; } catch (error) {
+      if (attempt >= 10 || !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        fs.rmSync(temp, { force: true });
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 * attempt);
+    }
+  }
 }
 
 export function loadBook(shared: string, project: string): Book {
@@ -367,6 +378,8 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
   // The messages read that the group's progress has moved past (what a stopped or failed reading did not finish is read again).
   let covered = 0;
   const threads = group.threads ??= {};
+  // Threads that could not be read this time: they stay where they were and are asked again next time.
+  const unread = new Set<string>();
   try {
     const project = projectOf(group.project);
     const from = Math.max(group.since, group.cursor);
@@ -377,20 +390,18 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     // Thread replies are listed only in their thread: every thread followed is asked for what came after the newest reply read in it.
     for (const message of raw) if (message.thread_id && !(message.thread_id in threads)) threads[message.thread_id] = time(message);
     const seen = new Set(raw.map(m => m.message_id));
-    const unread = new Set<string>();
     for (const [thread, newest] of Object.entries(threads)) {
       try {
         for (const message of await ctx.lark.thread(thread)) {
           if (time(message) > newest && time(message) <= now && !seen.has(message.message_id)) { seen.add(message.message_id); raw.push(message); }
         }
       } catch (error) {
-        // Not read: it stays where it was and is asked again next time.
         unread.add(thread);
         ctx.log(`话题读取失败，下次再读：${explainLark(error)}`);
       }
     }
     raw.sort((a, b) => time(a) - time(b));
-    if (!raw.length) return result;
+    if (!raw.length) { group.pending = false; return result; }
 
     // The last messages the previous readings read, for context: they are shown, not read again.
     const context: FeishuMessage[] = [];
@@ -423,7 +434,7 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
       }
     }
     const entryContext: EntryContext = { appId: ctx.lark.appId, name: id => names[id] || `成员${id.slice(-4)}`, forwarded: carried };
-    const bot = new Set([...parents.values(), ...context].filter(m => m.sender?.sender_type === 'app' && m.sender.id === ctx.lark.appId).map(m => m.message_id));
+    const bot = new Set([...raw, ...parents.values(), ...context].filter(m => m.sender?.sender_type === 'app' && m.sender.id === ctx.lark.appId).map(m => m.message_id));
     // Context goes short and without its pictures, leaving the chunk to what is new (a picture that matters is usually replied to, and then
     // comes along with the reply).
     const shown = entriesOf(context, entryContext).slice(-CONTEXT).map(e => {
@@ -441,16 +452,21 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     const ask = async (part: Entry[], pictures: boolean) => {
       const fresh = part.filter(e => !e.earlier).length;
       const head = `New messages from the review group (${fresh})${fresh < part.length ? `, with ${part.length - fresh} from earlier readings (marked 之前的消息)` : ''}`;
-      const parts: Part[] = [{ text: `${head}:\n\n${renderChunk(part, earlier, bot)}` }];
+      // A picture that does not come along (too large, left out, or one Feishu does not hand over: those of a forwarded chat) is marked as
+      // missing in the transcript, not labelled for an image that never follows.
+      const media: Part[] = [];
+      const attached = new Set<string>();
       let bytes = 0;
       for (const [i, entry] of part.entries()) {
         for (const [j, key] of (pictures ? entry.pictures : []).entries()) {
           const picture = await ctx.lark.picture(entry.id, key);
           if (!picture || !PICTURE_TYPES.has(picture.mime) || picture.data.length > PICTURE_MAX || bytes + picture.data.length > PICTURES_BYTES) continue;
           bytes += picture.data.length;
-          parts.push({ text: `[图片 #${i + 1}-${j + 1}]` }, { inlineData: { mimeType: picture.mime, data: picture.data.toString('base64') } });
+          attached.add(`${i + 1}-${j + 1}`);
+          media.push({ text: `[图片 #${i + 1}-${j + 1}]` }, { inlineData: { mimeType: picture.mime, data: picture.data.toString('base64') } });
         }
       }
+      const parts: Part[] = [{ text: `${head}:\n\n${renderChunk(part, earlier, bot, attached)}` }, ...media];
       return ctx.model.json({ system: distillSystem(project, fixed, promptRules(book, true), day(now)), parts, maxOutputTokens: 16_384 });
     };
     const done = (part: Entry[]) => {
@@ -463,6 +479,8 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     };
     let calls = 0;
     for (const [k, part] of all.entries()) {
+      // Nothing new in it, only what earlier readings read (the new messages were all left out: the bot's own replies, stickers): no call.
+      if (!part.some(e => !e.earlier)) { done(part); continue; }
       if (calls >= limit || (ctx.deadline !== undefined && Date.now() > ctx.deadline)) { result.pending = true; break; }
       calls++;
       if (all.length > 1) ctx.log(`整理 ${project.id} 动态规范：第 ${k + 1}/${all.length} 段（${part.length} 条消息）`);
@@ -470,20 +488,22 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
       try {
         reply = await ask(part, true);
       } catch (error) {
-        // A gateway that is down, busy or silent is tried again next time, as it is. Anything else may be this chunk itself: once more
-        // without its pictures, and a chunk that fails reading after reading is skipped, so that the group does not stop for good.
-        if (!(error instanceof Blocked) || error instanceof GatewayDown) throw error;
-        let last: Blocked = error;
+        // A gateway that is down, busy or silent, or that refuses every request as it is set up (the key, the model), is tried again next
+        // time, as it is. Anything else may be this chunk itself: once more without its pictures, and a chunk that fails reading after
+        // reading is skipped, so that the group does not stop for good.
+        if (notThisChunk(error)) throw error;
+        let last = error as Blocked;
         if (part.some(e => e.pictures.length)) {
           try { reply = await ask(part, false); } catch (again) {
-            if (!(again instanceof Blocked) || again instanceof GatewayDown) throw again;
-            last = again;
+            if (notThisChunk(again)) throw again;
+            last = again as Blocked;
           }
         }
         if (!reply) {
           const tries = group.stuck?.cursor === group.cursor ? group.stuck.tries + 1 : 1;
           if (tries < STUCK_TRIES) { group.stuck = { cursor: group.cursor, tries, reason: last.message }; throw last; }
-          group.skipped = [...(group.skipped ?? []), { from: stamp(part[0]!.at), to: stamp(part.at(-1)!.at), reason: last.message }].slice(-20);
+          const fresh = part.filter(e => !e.earlier);
+          group.skipped = [...(group.skipped ?? []), { from: stamp(fresh[0]!.at), to: stamp(fresh.at(-1)!.at), reason: last.message }].slice(-20);
           delete group.stuck;
           ctx.log(`有一段消息整理了 ${STUCK_TRIES} 次都失败，已跳过：${last.message}`);
           done(part);
@@ -515,12 +535,17 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     result.error = error instanceof Blocked ? error.message : explainLark(error);
     return result;
   } finally {
-    for (const [thread, newest] of Object.entries(threads)) if (newest < now - THREAD_DAYS * DAY) delete threads[thread];
+    // A thread is let go after THREAD_DAYS without a reply, which only a whole reading can tell: after one that stopped early or failed,
+    // and for a thread that could not be read, newer replies may not have been read yet.
+    if (!result.pending && !result.error) for (const [thread, newest] of Object.entries(threads)) if (!unread.has(thread) && newest < now - THREAD_DAYS * DAY) delete threads[thread];
     result.read = covered;
     group.read += covered;
     try { writeAtomic(namesFile(ctx.shared), `${JSON.stringify(names)}\n`); } catch { /* names are looked up again next time */ }
   }
 }
+
+/** A failure that is not this chunk's doing: the gateway, the network, or a bug. */
+const notThisChunk = (error: unknown) => !(error instanceof Blocked) || error instanceof GatewayDown || error instanceof GatewayRefused;
 
 function advance(group: Group, read: Pick<Entry, 'id' | 'at'>[]) {
   const newest = read.reduce((max, e) => Math.max(max, e.at), group.cursor);
@@ -531,11 +556,15 @@ function advance(group: Group, read: Pick<Entry, 'id' | 'at'>[]) {
 
 // ---- commands
 
+const notRead = (group: Group): GroupSync => ({ chat: group.chat, project: group.project, read: 0, considered: 0, added: [], updated: [], removed: [], pending: true });
 const summary = (r: GroupSync) => ({ project: r.project, read: r.read, considered: r.considered, added: r.added.length, updated: r.updated.length,
   removed: r.removed.length, pending: r.pending, ...(r.error ? { error: r.error } : {}) });
-/** How long a user's watch reads before answering (the rest is read by the daily sync), and how long the daily sync reads (the job is ended at 30). */
+/**
+ * How long a user's watch reads before answering (the rest is read by the daily sync), and how long the daily sync reads: the job is ended
+ * at 30 minutes, and a call started just before the time is up can take 10.
+ */
 const WATCH_MINUTES = 15;
-const SYNC_MINUTES = 20;
+const SYNC_MINUTES = 15;
 
 /** Starts listening to the turn's group for `project` (or reads it again from an earlier date), and reads its history right away. */
 export async function watch(project: Project, since: number | undefined, turn: Turn, ctx: RulesContext): Promise<Record<string, unknown>> {
@@ -588,8 +617,10 @@ export async function syncAll(ctx: RulesContext, options: { chat?: string; waitM
     const deadline = ctx.deadline ?? Date.now() + SYNC_MINUTES * 60_000;
     const results: Record<string, unknown>[] = [];
     for (const group of targets) {
-      const synced = await syncGroup(group, { ...ctx, deadline }, () => saveGroups(ctx.shared, groups));
-      group.lastSync = ctx.now?.() ?? Date.now();
+      // A group the time ran out on before it was read (at all, or before anything of it was) keeps its place, first in line the next
+      // time, instead of waiting behind the group that used the time up.
+      const synced = Date.now() > deadline ? notRead(group) : await syncGroup(group, { ...ctx, deadline }, () => saveGroups(ctx.shared, groups));
+      if (synced.read || !synced.pending) group.lastSync = ctx.now?.() ?? Date.now();
       if (synced.error) group.lastError = synced.error; else delete group.lastError;
       saveGroups(ctx.shared, groups);
       results.push({ chat: group.chat, ...(group.chat === options.chat ? { here: true } : {}), ...summary(synced) });

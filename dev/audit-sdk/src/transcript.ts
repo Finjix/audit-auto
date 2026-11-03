@@ -147,8 +147,9 @@ export const day = (ms: number) => stamp(ms).slice(0, 10);
 /**
  * The transcript of one chunk: `#n [time] sender（回复 #k）: text`, the pictures of message n labelled [图片 #n-1] …; `earlier` holds the
  * text of messages before the chunk, for replies to them, and `bot` the bot's own messages, which are not shown but may be replied to.
+ * `attached`, when given, holds the labels (`n-j`) of the pictures that go with the transcript; the others are marked as not attached.
  */
-export function renderChunk(entries: Entry[], earlier: Map<string, string>, bot: Set<string> = new Set()): string {
+export function renderChunk(entries: Entry[], earlier: Map<string, string>, bot: Set<string> = new Set(), attached?: Set<string>): string {
   const number = new Map(entries.map((e, i) => [e.id, i + 1]));
   return entries.map((entry, i) => {
     const n = i + 1;
@@ -159,7 +160,7 @@ export function renderChunk(entries: Entry[], earlier: Map<string, string>, bot:
       reply = k && k < n ? `（回复 #${k}）` : before ? `（回复：「${clip(before.replace(/\s+/g, ' '), 40)}」）`
         : bot.has(entry.reply) ? '（回复机器人的消息）' : '（回复更早的消息）';
     }
-    const pictures = entry.pictures.map((_, j) => ` [图片 #${n}-${j + 1}]`).join('');
+    const pictures = entry.pictures.map((_, j) => !attached || attached.has(`${n}-${j + 1}`) ? ` [图片 #${n}-${j + 1}]` : ' [图片（没能附上）]').join('');
     return `${entry.forwarded ? '    ↳ ' : ''}#${n} [${stamp(entry.at)}] ${entry.by}${entry.earlier ? '（之前的消息）' : ''}${reply}: ${entry.text}${pictures}`;
   }).join('\n');
 }

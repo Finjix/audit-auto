@@ -36,7 +36,14 @@ export interface Context {
 }
 
 function parse(args: string[], options: Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>) {
-  try { return parseArgs({ args, options, allowPositionals: false, strict: true }).values; } catch (error) { throw new Blocked(messageOf(error)); }
+  // A value that starts with "-" (a note like "-B 面从 5 秒开始") would be taken for an option: it is joined to its option instead.
+  const joined: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg.startsWith('--') && options[arg.slice(2)]?.type === 'string' && args[i + 1]?.startsWith('-')) joined.push(`${arg}=${args[++i]}`);
+    else joined.push(arg);
+  }
+  try { return parseArgs({ args: joined, options, allowPositionals: false, strict: true }).values; } catch (error) { throw new Blocked(messageOf(error)); }
 }
 
 const version = (root: string) => {
@@ -56,7 +63,8 @@ function sinceOf(value: unknown): number | undefined {
   const text = String(value).trim();
   need(/^\d{4}-\d{2}-\d{2}$/.test(text), '--since 要写成 YYYY-MM-DD，比如 2026-09-01');
   const at = Date.parse(`${text}T00:00:00+08:00`);
-  need(Number.isFinite(at), `--since 不是有效的日期：${text}`);
+  // A day the month does not have (2026-02-30) would otherwise become one in the next month.
+  need(Number.isFinite(at) && new Date(at + 8 * 3_600_000).toISOString().startsWith(text), `--since 不是有效的日期：${text}`);
   return at;
 }
 
@@ -127,8 +135,9 @@ async function rulesCommand(action: string | undefined, args: string[], ctx: Con
     case 'unwatch': parse(args, {}); return unwatch(turn, { shared: shared() });
     case 'sync': {
       const values = parse(args, { here: { type: 'boolean' } });
+      need(!values.here || turn.chat, '不知道这条消息来自哪个群：请在要更新的群里 @机器人 再说一次');
       try {
-        return await syncAll(rulesContext(ctx), { ...(values.here ? { chat: turn.chat ?? '' } : {}), waitMs: turn.chat ? 5 * 60_000 : 0 });
+        return await syncAll(rulesContext(ctx), { ...(values.here ? { chat: turn.chat! } : {}), waitMs: turn.chat ? 5 * 60_000 : 0 });
       } catch (error) {
         // The daily job finding a user's watch (or the previous run) still at work: nothing is lost, the next run reads on from there.
         if (error instanceof Busy && !turn.chat) return { status: 'busy', reason: error.message };

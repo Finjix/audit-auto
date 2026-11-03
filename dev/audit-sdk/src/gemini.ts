@@ -23,6 +23,8 @@ export interface Model { name: string; json(request: JsonRequest): Promise<JsonR
 class InvalidAnswer extends Error {}
 /** The gateway is down, busy or silent right now: the same request may well go through later (401, 400, a filtered answer will not). */
 export class GatewayDown extends Blocked {}
+/** The gateway refuses every request as it is set up now (the key, the model's name): nothing in this request is at fault. */
+export class GatewayRefused extends Blocked {}
 
 const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 const NETWORK = /fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|UND_ERR_SOCKET|socket hang up|other side closed/i;
@@ -107,8 +109,9 @@ function explain(error: unknown, gateway: Gateway): Blocked {
   if (error instanceof ApiError) {
     const detail = redact(messageOf(error), [gateway.key]).slice(0, 300);
     switch (true) {
-      case error.status === 401 || error.status === 403: return new Blocked(`AI 网关不接受这个 key（HTTP ${error.status}），请联系管理员`);
-      case error.status === 404: return new Blocked(`AI 网关上找不到模型 ${gateway.model}（HTTP 404），请联系管理员`);
+      case error.status === 401 || error.status === 403: return new GatewayRefused(`AI 网关不接受这个 key（HTTP ${error.status}），请联系管理员`);
+      case error.status === 404: return new GatewayRefused(`AI 网关上找不到模型 ${gateway.model}（HTTP 404），请联系管理员`);
+      case error.status === 408: return new GatewayDown('AI 网关超时（HTTP 408），稍后再试');
       case error.status === 413: return new Blocked('文件太大，AI 网关拒收（HTTP 413）：请压缩后再发');
       case error.status === 429: return new GatewayDown('AI 网关正在限流（HTTP 429），过几分钟再试');
       case error.status >= 500: return new GatewayDown(`AI 网关暂时不可用（HTTP ${error.status}），稍后再试`);

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pluginRoot } from '../src/config.ts';
 import { Blocked } from '../src/errors.ts';
-import { GatewayDown } from '../src/gemini.ts';
+import { GatewayDown, GatewayRefused } from '../src/gemini.ts';
 import { LarkError } from '../src/lark.ts';
 import { PROJECTS } from '../src/projects.ts';
 import { loadBook, show, status, syncAll, watch, withLock } from '../src/rules.ts';
@@ -53,6 +53,36 @@ test('a thread is followed: replies that come after its first message was read a
   assert.deepEqual(groupsOf(shared)[0].threads, {});
 });
 
+test('an old thread is let go only once all of it has been read: not after a reading that stopped early, nor when it could not be read', async () => {
+  // A thread 100 days old with 25 long replies: more than one model call holds, and the first reading makes only one.
+  const { shared, lark, model, ctx } = setup();
+  const start = NOW - 100 * DAY;
+  const root = message(start, { text: '这条拒审了，大家看下原因' }, { thread_id: 'omt_old' });
+  lark.messages.push(root);
+  const replies = Array.from({ length: 25 }, (_, i) => message(start + (i + 1) * 60_000, { text: `第 ${i + 1} 条：${'很长的讨论'.repeat(400)}` }, { thread_id: 'omt_old', parent_id: root.message_id }));
+  lark.threads.set('omt_old', [root, ...replies]);
+  const first = await watch(PROJECTS.GOF, undefined, group, { ...ctx, maxChunks: 1 });
+  assert.equal(first.pending, true);
+  assert.ok('omt_old' in groupsOf(shared)[0].threads, 'still followed: the rest of it is unread');
+  const second = await syncAll({ ...ctx, maxChunks: 1 });
+  assert.equal((second.groups as { pending: boolean }[])[0]!.pending, false);
+  assert.match(textOf(model.calls[1]!), /第 25 条/, 'the rest is read at the next sync');
+  assert.deepEqual(groupsOf(shared)[0].threads, {}, 'read to its end, and older than two weeks: let go');
+
+  // A thread that could not be read at the first reading is read at the next, old as it is.
+  const { shared: shared2, lark: lark2, model: model2, ctx: ctx2 } = setup();
+  const root2 = message(start, { text: '这条拒审了，大家看下原因' }, { thread_id: 'omt_2' });
+  lark2.messages.push(root2);
+  lark2.threads.set('omt_2', [root2, message(start + 60_000, { text: '以后这种箭头都不行' }, { thread_id: 'omt_2', parent_id: root2.message_id })]);
+  const reading = lark2.thread.bind(lark2);
+  lark2.thread = async () => { throw new LarkError(500, 'busy'); };
+  await watch(PROJECTS.GOF, undefined, group, ctx2);
+  assert.equal(groupsOf(shared2)[0].threads.omt_2, start, 'kept where it was');
+  lark2.thread = reading;
+  await syncAll(ctx2);
+  assert.match(textOf(model2.calls.at(-1)!), /以后这种箭头都不行/);
+});
+
 test('a chunk the model keeps refusing goes once more without its pictures, and after three readings it is skipped, so the group goes on', async () => {
   const { shared, lark, ctx } = setup();
   lark.messages.push(message(NOW - DAY, { image_key: 'img_bad' }, { type: 'image' }), message(NOW - DAY + 1000, { text: '这张图被拒了' }));
@@ -89,9 +119,40 @@ test('a chunk the model keeps refusing goes once more without its pictures, and 
   assert.equal(groupsOf(shared2)[0].skipped, undefined);
   assert.equal(groupsOf(shared2)[0].cursor, 0);
   assert.equal(down.calls.length, 4, 'one call a reading: no picture to leave out');
+
+  // Nor does a key the gateway no longer takes: once it is fixed, the chunk is read as if nothing happened.
+  const { shared: shared3, lark: lark3, ctx: ctx3 } = setup();
+  lark3.messages.push(message(NOW - DAY, { text: '「搞钱」不能写' }));
+  const refusing = new FakeModel(() => new GatewayRefused('AI 网关不接受这个 key（HTTP 401），请联系管理员'));
+  for (let i = 0; i < 4; i++) await (i ? syncAll({ ...ctx3, model: refusing }) : watch(PROJECTS.GOF, undefined, group, { ...ctx3, model: refusing }));
+  assert.equal(groupsOf(shared3)[0].stuck, undefined);
+  assert.equal(groupsOf(shared3)[0].skipped, undefined);
+  assert.equal(groupsOf(shared3)[0].lastError, 'AI 网关不接受这个 key（HTTP 401），请联系管理员');
 });
 
-test('the daily sync reads the group read longest ago first, stops starting calls when its time is up, and fails when every group fails', async () => {
+test('a skipped stretch is dated by its own new messages, not by the earlier ones shown with it', async () => {
+  const { shared, lark, model, ctx } = setup();
+  lark.messages.push(message(NOW - 3 * DAY, { text: '「上头」不能写' }));
+  await watch(PROJECTS.GOF, undefined, group, ctx);
+  lark.messages.push(message(NOW + 60_000, { text: '这张也被拒了' }));
+  model.answer = () => new Blocked('AI 网关拒绝了这次请求（HTTP 400）：invalid argument');
+  for (let i = 0; i < 3; i++) await syncAll({ ...ctx, now: () => NOW + 3_600_000 });
+  assert.deepEqual(groupsOf(shared)[0].skipped.map((s: { from: string; to: string }) => [s.from, s.to]), [['2026-11-02 16:01', '2026-11-02 16:01']]);
+});
+
+test('when the only new messages are left out (the bot\'s own reply, a sticker) nobody is asked; a reply to the bot says so', async () => {
+  const { shared, lark, model, ctx } = setup();
+  const result = message(NOW - DAY, { text: '审片结果：……' }, { from: 'cli_bot' });
+  lark.messages.push(result, message(NOW - DAY + 60_000, { text: '这个判错了，「赚米」可以写' }, { parent_id: result.message_id }));
+  await watch(PROJECTS.GOF, undefined, group, ctx);
+  assert.match(textOf(model.calls[0]!), /#1 .*王审核（回复机器人的消息）: 这个判错了/);
+  lark.messages.push(message(NOW + 60_000, { text: '已经更新' }, { from: 'cli_bot' }), message(NOW + 120_000, { file_key: 'x' }, { type: 'sticker' }));
+  await syncAll({ ...ctx, now: () => NOW + 3_600_000 });
+  assert.equal(model.calls.length, 1);
+  assert.equal(groupsOf(shared)[0].cursor, NOW + 120_000, 'read past them');
+});
+
+test('the daily sync reads the group read longest ago first; a group the time ran out on keeps its place; every group failing is a failure', async () => {
   const { shared, lark, model, ctx } = setup();
   lark.messages.push(message(NOW - DAY, { text: '「上头」不能写' }));
   await watch(PROJECTS.GOF, undefined, group, ctx);
@@ -103,9 +164,18 @@ test('the daily sync reads the group read longest ago first, stops starting call
   const asked: string[] = [];
   lark.history = (async function* (this: FakeLark, chat: string) { asked.push(chat); for (const m of this.messages) if (Number(m.create_time) >= NOW) yield m; }).bind(lark);
   const late = await syncAll({ ...ctx, now: () => NOW + 2000, deadline: Date.now() - 1 });
-  assert.deepEqual(asked, ['oc_other', 'oc_review']);
-  assert.deepEqual((late.groups as { pending: boolean }[]).map(g => g.pending), [true, true], 'out of time: nothing started, all left for next time');
+  assert.deepEqual(asked, [], 'out of time: nothing is read');
+  assert.deepEqual((late.groups as { pending: boolean }[]).map(g => g.pending), [true, true], 'all left for next time');
   assert.equal(model.calls.length, 2, 'only the two watches');
+
+  // The first group takes the time up: the other is not read at all, and so it comes first the next time.
+  const slow = new FakeModel(async () => { await new Promise(resolve => setTimeout(resolve, 300)); return { operations: [] }; });
+  const short = await syncAll({ ...ctx, model: slow, now: () => NOW + 3000, deadline: Date.now() + 100 });
+  assert.deepEqual(asked, ['oc_other']);
+  assert.deepEqual((short.groups as { chat: string; pending: boolean }[]).map(g => [g.chat, g.pending]), [['oc_other', false], ['oc_review', true]]);
+  asked.length = 0;
+  await syncAll({ ...ctx, now: () => NOW + 4000 });
+  assert.deepEqual(asked, ['oc_review', 'oc_other']);
 
   lark.history = async function* () { throw new LarkError(230002, 'bot not in chat'); };
   const broken = await syncAll(ctx);

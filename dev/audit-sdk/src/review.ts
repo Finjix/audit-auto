@@ -164,16 +164,23 @@ export async function materials(files: string[], scratch: string): Promise<{ lis
     }
     const refused = refusal(name);
     if (refused) skipped.push({ file: name, reason: refused });
-    else list.push({ file, name });
+    else list.push({ file, name: sentName(name) });
   }
   return { list, skipped };
 }
 
+/**
+ * A file's name as the user sent it: lark-agent saves a file sent again under a name already taken as "name (2).mp4", and that " (2)" is
+ * no part of the name the naming rules judge.
+ */
+export const sentName = (name: string) => name.replace(/ \(\d+\)(?=\.[^.]+$)/, '');
+
 export async function reviewOne(material: Material, project: Project, system: string, note: string | undefined, ctx: ReviewContext): Promise<FileResult> {
   const started = Date.now();
-  let media: Prepared;
+  let media: Prepared, data: Buffer;
   try {
     media = await prepare(material.file, ctx.scratch, ctx.ffmpeg);
+    data = await fs.promises.readFile(media.file);
   } catch (error) {
     return { name: material.name, status: 'failed', reason: error instanceof Blocked ? error.message : `读不了这个文件：${messageOf(error)}` };
   }
@@ -181,7 +188,7 @@ export async function reviewOne(material: Material, project: Project, system: st
     ? `Video: ${media.duration ? `${media.duration} s` : 'duration unknown'}${media.orientation ? `, ${media.orientation}` : ''}; you see ${media.fps} frames per second.`
     : 'Image.';
   const parts: Part[] = [
-    { inlineData: { mimeType: media.mime, data: (await fs.promises.readFile(media.file)).toString('base64') }, ...(media.kind === 'video' ? { videoMetadata: { fps: media.fps! } } : {}) },
+    { inlineData: { mimeType: media.mime, data: data.toString('base64') }, ...(media.kind === 'video' ? { videoMetadata: { fps: media.fps! } } : {}) },
     { text: [`File name: ${path.posix.basename(material.name.replace(/\\/g, '/'))}`, facts, note ? `Notes from the user: ${note}` : '', `Review this ${media.kind} for ${project.id}.`].filter(Boolean).join('\n') },
   ];
   const base = { name: material.name, media: media.kind, ...(media.duration ? { duration: media.duration } : {}), ...(media.orientation ? { orientation: media.orientation } : {}),

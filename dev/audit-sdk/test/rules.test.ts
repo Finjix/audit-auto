@@ -149,6 +149,7 @@ test('the command line: watch, status, show, remove and unwatch, as the host run
   const run = (...args: string[]) => main(args, { env, lark, model, now: () => NOW, log: () => {} });
   assert.equal((await run('rules', 'watch')).result.reason, '缺少 --project：先问用户这个群是 GOF 还是 GOT 的审核群');
   assert.match(String((await run('rules', 'watch', '--project', 'GOF', '--since', '2026/09/01')).result.reason), /YYYY-MM-DD/);
+  assert.match(String((await run('rules', 'watch', '--project', 'GOF', '--since', '2026-02-30')).result.reason), /不是有效的日期/, 'not taken for 03-02');
   const watched = await run('rules', 'watch', '--project', 'GOF', '--since', '2026-10-29');
   assert.equal(watched.code, 0);
   assert.equal(watched.result.since, '2026-10-29');
@@ -172,6 +173,8 @@ test('the command line: watch, status, show, remove and unwatch, as the host run
   assert.deepEqual(stopped.result, { status: 'stopped', project: 'GOF', rules: 1 });
   assert.match(String((await run('rules', 'unwatch')).result.reason), /本群没有在监听/);
   assert.match(String((await run('rules', 'sync', '--here')).result.reason), /本群没有在监听/);
+  const nowhere = await main(['rules', 'sync', '--here'], { env: { LARK_AGENT_SHARED_DIR: path.dirname(shared) }, lark, model, now: () => NOW, log: () => {} });
+  assert.match(String(nowhere.result.reason), /不知道这条消息来自哪个群/, 'without a chat, "here" is not every group');
   assert.match(String((await run('rules', 'nope')).result.reason), /rules 需要/);
 });
 

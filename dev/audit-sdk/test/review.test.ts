@@ -115,6 +115,14 @@ test('GOT has only its dynamic spec: with none the review is refused with what t
   assert.deepEqual(outcome.rules, { fixed: false, dynamic: 1 });
 });
 
+test('a file sent again, which the host saved as "name (2).mp4", is reviewed under the name it was sent with', async () => {
+  const dir = tempDir('input-');
+  const model = new FakeModel(() => ANSWER);
+  const outcome = await review(PROJECTS.GOF, [video(dir, 'GOFCN1_竖版 (2).mp4')], undefined, context(model));
+  assert.match(textOf(model.calls[0]!), /File name: GOFCN1_竖版\.mp4\n/);
+  assert.equal(outcome.results[0]!.name, 'GOFCN1_竖版.mp4');
+});
+
 test('a zip is unpacked into the scratch folder and each material in it reviewed under its path in the zip', async () => {
   const dir = tempDir('input-');
   const zip = path.join(dir, '素材.zip');
@@ -153,6 +161,10 @@ test('the command line: review prints the Markdown and keeps the details outside
   assert.deepEqual(fs.readdirSync(workspace), ['input'], 'nothing new in the workspace: the host would send it to the user');
   assert.deepEqual(fs.readdirSync(path.join(user, 'audit-auto', 'tmp')), [], 'the scratch folder of the run is gone');
   assert.match(lines.join('\n'), /审片 1\/1：GOFCN3\.mp4[\s\S]*完成 1\/1：GOFCN3\.mp4，4 处问题/);
+  // A note that starts with a dash is still the note, not an option.
+  const dashed = await main(['review', '--project', 'GOF', '--file', file, '--note', '-B 面从 5 秒开始'], { env, model, ffmpeg: null, log: () => {} });
+  assert.equal(dashed.code, 0, String(dashed.result.reason));
+  assert.match(textOf(model.calls.at(-1)!), /Notes from the user: -B 面从 5 秒开始/);
 
   for (const [args, reason] of [
     [['review', '--file', file], /缺少 --project/],

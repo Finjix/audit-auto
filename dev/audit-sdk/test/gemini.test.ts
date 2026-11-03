@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MediaResolution } from '@google/genai';
-import { gatewayModel } from '../src/gemini.ts';
+import { GatewayDown, GatewayRefused, gatewayModel } from '../src/gemini.ts';
 
 const GATEWAY = { baseUrl: 'https://lumos.diandian.info/winky/gemini', apiVersion: 'v1', model: 'gemini-3.8-flash', thinkingLevel: 'MEDIUM', key: 'sk-test-key-123' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -57,6 +57,10 @@ test('a busy gateway, a broken answer and the network are tried again; the rest 
 
   await assert.rejects(gateway([() => json({}, 401)]).model.json({ system: '', parts: [] }), /不接受这个 key/);
   await assert.rejects(gateway([() => json({}, 404)]).model.json({ system: '', parts: [] }), /找不到模型 gemini-3.8-flash/);
+  // A key or model the gateway refuses is how it is set up, not this request; a gateway that timed out the request is only slow now.
+  assert.ok(await gateway([() => json({}, 403)]).model.json({ system: '', parts: [] }).catch((e: Error) => e) instanceof GatewayRefused);
+  const late = await gateway([() => json({}, 408), () => json({}, 408), () => json({}, 408)]).model.json({ system: '', parts: [] }).catch((e: Error) => e);
+  assert.ok(late instanceof GatewayDown && /HTTP 408/.test(late.message), String(late));
   await assert.rejects(gateway([() => answer('', 'PROHIBITED_CONTENT')]).model.json({ system: '', parts: [] }), /安全策略拦下了这次回答/);
   await assert.rejects(gateway([() => json({ promptFeedback: { blockReason: 'OTHER' } })]).model.json({ system: '', parts: [] }), /安全策略拦下了这次请求/);
   await assert.rejects(gateway([() => answer('x', 'MAX_TOKENS'), () => answer('x', 'MAX_TOKENS'), () => answer('x', 'MAX_TOKENS')]).model.json({ system: '', parts: [] }), /没有给出完整的结果/);

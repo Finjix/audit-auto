@@ -29,13 +29,6 @@ start.cmd
 | 交付 | 审片结果在回复里；开始监听、立即更新只回复几句话，不发文件；用户要看规范时，`rules show --output` 写进工作目录的 `动态审片规范-<项目>.md` 随回复发给用户 |
 | MCP 服务 | 没有，只有命令行 |
 
-## lark-agent README 里要跟着改的
-
-lark-agent 的 README 里关于 audit-auto 的两处说的是以前的版本：
-
-- 「插件调用插件」一节说 audit-auto「素材审核，读飞书脚本」经由 feishu 插件：新版本不读飞书脚本，不经由 feishu 插件。
-- 「定时任务」一节的例子 `${PLUGIN_ROOT}/scripts/rules.mjs sync` 只是例子；实际是 `${PLUGIN_ROOT}/server/dist/audit.mjs rules sync`。
-
 ## 验收（部署后在飞书里做）
 
 1. 私聊发一条视频，不说项目：机器人应先问 GOF 还是 GOT。
