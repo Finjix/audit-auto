@@ -11,7 +11,7 @@ import { chunks, day, entriesOf, entryOf, renderChunk, stamp, type Entry, type E
 
 /*
  * The dynamic spec: review rules that come out of a project's review groups. Someone @-mentions the bot in a group with
- * 「监听本群更新审片规范」 (watch); from then on the group's messages are read (the history once, then once a day what is new, see
+ * 「监听本群更新审片规范」 (watch); from then on the group's messages are read (the last year once, then once a day what is new, see
  * lark-agent.json) and Gemini turns the rulings in them into changes of the project's dynamic spec: add, update or remove a rule. Each
  * rule keeps the messages it rests on. The reviews of the project apply it together with the fixed spec.
  *
@@ -27,7 +27,7 @@ export const CATEGORIES = ['红线', '字幕和口播', '画面和界面', '和�
 const TYPES = /素材类型|3D|玩法|解说|迭代|真人|实拍|AI|明星|KOL/i;
 const DAY = 24 * 60 * 60_000;
 /** How far back the first reading of a group goes unless the user says. */
-export const HISTORY_DAYS = 180;
+export const HISTORY_DAYS = 365;
 const PICTURE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif']);
 const PICTURE_MAX = 8 * 1024 * 1024;
 /** Pictures one model call carries at most, in bytes (the request goes inline). */
@@ -36,10 +36,14 @@ const PICTURES_BYTES = 16 * 1024 * 1024;
 const THREAD_DAYS = 14;
 /** Messages from before a reading that its replies point to, looked up at most per reading. */
 const PARENTS_MAX = 50;
+/** Messages from just before a reading that go with it, so that a new one that refers to them without replying (「那个也不行」) makes sense. */
+const CONTEXT = 20;
+const CONTEXT_CHARS = 300;
 /** Readings in a row the model may fail on the same chunk before the chunk is skipped. */
 const STUCK_TRIES = 3;
 
-export interface Source { chat: string; message: string; at: number; by?: string }
+/** A message a rule rests on; `text`, a few of its words, shows the model what the rule came from. */
+export interface Source { chat: string; message: string; at: number; by?: string; text?: string }
 export interface Rule { id: string; category: string; rule: string; fix?: string; example?: string; sources: Source[]; created: number; updated: number }
 export interface Removed extends Rule { removed: number; reason: string; by: 'chat' | 'user' }
 export interface Book { version: 1; project: string; next: number; rules: Rule[]; removed: Removed[]; updated: number }
@@ -164,9 +168,18 @@ const sourcesText = (sources: Source[]) => {
   return named.length > 3 ? `${named.slice(-3).join('、')} 等 ${sources.length} 条消息` : named.join('、');
 };
 
-/** The dynamic spec for the model: one line a rule, with its id (the review cites it, the next sync changes it by it). */
-export function promptRules(book: Book): string {
-  return book.rules.map(r => `- ${r.id}〔${r.category}〕${r.rule}${r.fix ? ` 怎么改：${r.fix}` : ''}${r.example ? ` 例：${r.example}` : ''}（${day(r.updated)}）`).join('\n');
+/** The words of the newest messages a rule rests on: 王审核「以后「上头」都别写了」. */
+const saidText = (sources: Source[]) => sources.filter(s => s.text).slice(-2).map(s => `${s.by ?? '成员'}「${s.text}」`).join('；');
+
+/**
+ * The dynamic spec for the model: one line a rule, with its id (the review cites it, the next sync changes it by it); `withSources` adds
+ * the words it came from, for the sync that may change it.
+ */
+export function promptRules(book: Book, withSources = false): string {
+  return book.rules.map(r => {
+    const said = withSources ? saidText(r.sources) : '';
+    return `- ${r.id}〔${r.category}〕${r.rule}${r.fix ? ` 怎么改：${r.fix}` : ''}${r.example ? ` 例：${r.example}` : ''}（${day(r.updated)}${said ? `；依据：${said}` : ''}）`;
+  }).join('\n');
 }
 
 /** The dynamic spec for people. */
@@ -206,6 +219,7 @@ export function distillSystem(project: Project, fixed: string, current: string, 
     '# What counts as a rule',
     `A rule says what the project's ad material may or may not contain, or how it has to be made, to pass review: a platform's rejection and its reason, a reviewer's ruling ("X 不能用", "Y 可以用了", "Z 要写成 W"), a new requirement, a correction or withdrawal of an earlier rule, a number or wording made precise. Leave out everything else: chatter, thanks, scheduling, who does what, where files are uploaded or delivered, questions nobody answered, and decisions about one particular material that set no rule for others.`,
     `Weigh the messages: a platform's rejection or the ruling of whoever reviews counts; a guess or a question does not, until someone answers it. A reply belongs to the message it answers: a question and its answer make one ruling. Pictures (attached after the transcript, labelled with their message number) count as messages: a screenshot of a rejection notice gives its reason.`,
+    `Messages marked 之前的消息 were read at an earlier reading: the last ones before the new messages, and earlier ones a new message replies to. They are there so that the new messages can be understood ("那个也不行" refers to what came just before); whatever they ruled is in the dynamic spec already. Give operations for what the new messages say, citing earlier messages only together with new ones.`,
     '',
     '# Operations',
     'Go through the messages in order and give one operation for every ruling in them; several rulings in one message are several operations.',
@@ -226,6 +240,7 @@ export function distillSystem(project: Project, fixed: string, current: string, 
     fixed || '(none yet)',
     '',
     '# Dynamic spec now',
+    'Each rule with the date it last changed and the words of the messages it rests on (依据).',
     current || '(empty)',
   ].join('\n');
 }
@@ -254,15 +269,18 @@ export function categoryOf(value: string | undefined): string {
   return found ?? (TYPES.test(value) ? '按素材类型' : /字幕|口播|文案/.test(value) ? '字幕和口播' : /画面|界面|UI/i.test(value) ? '画面和界面' : '其他');
 }
 
-/** Applies the model's operations to the spec. One that names no message of this chunk, or a rule that does not exist, is not taken. */
-export function apply(book: Book, operations: Operation[], refs: Map<number, Source>, now: number): Changes {
+/**
+ * Applies the model's operations to the spec. One that names no message of this chunk, or only messages from an earlier reading
+ * (`earlier`, their numbers), or a rule that does not exist, is not taken.
+ */
+export function apply(book: Book, operations: Operation[], refs: Map<number, Source>, now: number, earlier: Set<number> = new Set()): Changes {
   const changes: Changes = { added: [], updated: [], removed: [] };
   // An answer may give a rule it adds an id of its own and change it further down: that id stands for the rule's real one.
   const given = new Map<string, string>();
   const idOf = (id: string | undefined) => id ? given.get(id) ?? id : undefined;
   for (const op of operations) {
     const sources = [...new Set(op.messages)].map(n => refs.get(n)).filter((s): s is Source => !!s);
-    if (!sources.length) continue;
+    if (!op.messages.some(n => refs.has(n) && !earlier.has(n))) continue;
     if (op.op === 'add') {
       if (!op.rule) continue;
       const same = book.rules.find(r => squash(r.rule) === squash(op.rule!));
@@ -374,19 +392,29 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     raw.sort((a, b) => time(a) - time(b));
     if (!raw.length) return result;
 
+    // The last messages the previous readings read, for context: they are shown, not read again.
+    const context: FeishuMessage[] = [];
+    if (group.cursor > 0) {
+      const before = (m: FeishuMessage) => time(m) >= group.since && !seen.has(m.message_id) && (time(m) < group.cursor || group.cursorIds.includes(m.message_id));
+      try { context.push(...(await ctx.lark.recent(group.chat, Math.floor(group.cursor / 1000), CONTEXT + 10)).filter(before)); } catch (error) {
+        ctx.log(`读不到之前的消息，这次不带上：${explainLark(error)}`);
+      }
+    }
+    const shownBefore = new Set(context.map(m => m.message_id));
+
     const carried = new Map<string, FeishuMessage[]>();
     for (const message of raw.filter(m => m.msg_type === 'merge_forward')) {
       try { carried.set(message.message_id, await ctx.lark.message(message.message_id)); } catch { /* shown as a forward without its content */ }
     }
     // A reply to a message from an earlier reading needs that message to make sense (「以后这种都不行」).
     const parents = new Map<string, FeishuMessage>();
-    for (const id of [...new Set(raw.map(m => m.parent_id).filter((p): p is string => !!p && !seen.has(p)))].slice(0, PARENTS_MAX)) {
+    for (const id of [...new Set(raw.map(m => m.parent_id).filter((p): p is string => !!p && !seen.has(p) && !shownBefore.has(p)))].slice(0, PARENTS_MAX)) {
       try {
         const parent = (await ctx.lark.message(id)).find(m => m.message_id === id);
         if (parent) parents.set(id, parent);
       } catch { /* shown as a reply to an earlier message */ }
     }
-    const people = new Set([...raw, ...[...carried.values()].flat(), ...parents.values()].map(fromUser).filter((id): id is string => !!id));
+    const people = new Set([...raw, ...[...carried.values()].flat(), ...parents.values(), ...context].map(fromUser).filter((id): id is string => !!id));
     for (const id of people) {
       // A name that cannot be looked up now (no permission yet, say) is asked again next time.
       if (!names[id]) {
@@ -395,8 +423,14 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
       }
     }
     const entryContext: EntryContext = { appId: ctx.lark.appId, name: id => names[id] || `成员${id.slice(-4)}`, forwarded: carried };
-    const bot = new Set([...parents.values()].filter(m => m.sender?.sender_type === 'app' && m.sender.id === ctx.lark.appId).map(m => m.message_id));
-    const entries = withParents(entriesOf(raw, entryContext), parents, entryContext);
+    const bot = new Set([...parents.values(), ...context].filter(m => m.sender?.sender_type === 'app' && m.sender.id === ctx.lark.appId).map(m => m.message_id));
+    // Context goes short and without its pictures, leaving the chunk to what is new (a picture that matters is usually replied to, and then
+    // comes along with the reply).
+    const shown = entriesOf(context, entryContext).slice(-CONTEXT).map(e => {
+      const text = e.text.length > CONTEXT_CHARS ? `${e.text.slice(0, CONTEXT_CHARS)}…` : e.text;
+      return { ...e, earlier: true, pictures: [], text: e.pictures.length ? `${text} [图片]`.trim() : text };
+    });
+    const entries = [...shown, ...withParents(entriesOf(raw, entryContext), parents, entryContext)];
     result.considered = entries.filter(e => !e.earlier).length;
 
     const all = chunks(entries);
@@ -406,7 +440,7 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
     const earlier = new Map<string, string>();
     const ask = async (part: Entry[], pictures: boolean) => {
       const fresh = part.filter(e => !e.earlier).length;
-      const head = `New messages from the review group (${fresh})${fresh < part.length ? `, with ${part.length - fresh} earlier ones they reply to (marked 之前的消息)` : ''}`;
+      const head = `New messages from the review group (${fresh})${fresh < part.length ? `, with ${part.length - fresh} from earlier readings (marked 之前的消息)` : ''}`;
       const parts: Part[] = [{ text: `${head}:\n\n${renderChunk(part, earlier, bot)}` }];
       let bytes = 0;
       for (const [i, entry] of part.entries()) {
@@ -417,7 +451,7 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
           parts.push({ text: `[图片 #${i + 1}-${j + 1}]` }, { inlineData: { mimeType: picture.mime, data: picture.data.toString('base64') } });
         }
       }
-      return ctx.model.json({ system: distillSystem(project, fixed, promptRules(book), day(now)), parts, maxOutputTokens: 16_384 });
+      return ctx.model.json({ system: distillSystem(project, fixed, promptRules(book, true), day(now)), parts, maxOutputTokens: 16_384 });
     };
     const done = (part: Entry[]) => {
       const fresh = part.filter(e => !e.earlier);
@@ -457,8 +491,12 @@ export async function syncGroup(group: Group, ctx: RulesContext, persist: () => 
         }
       }
       delete group.stuck;
-      const refs = new Map(part.map((e, i) => [i + 1, { chat: group.chat, message: e.id, at: e.at, by: e.by } satisfies Source]));
-      const changes = apply(book, operationsOf(reply.data), refs, now);
+      const refs = new Map(part.map((e, i) => {
+        const words = e.text.replace(/\s+/g, ' ').trim().slice(0, 60) || (e.pictures.length ? '[图片]' : '');
+        return [i + 1, { chat: group.chat, message: e.id, at: e.at, by: e.by, ...(words ? { text: words } : {}) } satisfies Source] as const;
+      }));
+      const earlierOnes = new Set(part.flatMap((e, i) => e.earlier ? [i + 1] : []));
+      const changes = apply(book, operationsOf(reply.data), refs, now, earlierOnes);
       result.added.push(...changes.added);
       result.updated.push(...changes.updated.filter(id => !result.updated.includes(id)));
       result.removed.push(...changes.removed);

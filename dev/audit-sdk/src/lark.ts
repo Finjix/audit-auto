@@ -26,6 +26,8 @@ export interface Lark {
   appId: string;
   /** The messages of a chat from `start` to `end` (seconds since the epoch), oldest first. */
   history(chat: string, start: number, end: number): AsyncGenerator<FeishuMessage>;
+  /** The last `count` messages of a chat up to `end` (seconds since the epoch, at most 50), oldest first. */
+  recent(chat: string, end: number, count: number): Promise<FeishuMessage[]>;
   /** The replies in a thread (topic), oldest first. */
   thread(thread: string): Promise<FeishuMessage[]>;
   /** A message by its id: the message, and for a merged-and-forwarded one the messages it carries (their upper_message_id is its id). */
@@ -113,6 +115,10 @@ export function botLark(app: App, fetchImpl: typeof fetch = fetch, sleep = (ms: 
   return {
     appId: app.id,
     history: (chat, start, end) => pages({ container_id_type: 'chat', container_id: chat, start_time: start, end_time: end }),
+    async recent(chat, end, count) {
+      const data = await call('/im/v1/messages', { container_id_type: 'chat', container_id: chat, end_time: end, sort_type: 'ByCreateTimeDesc', page_size: Math.min(count, PAGE) });
+      return ((data.items ?? []) as FeishuMessage[]).reverse();
+    },
     async thread(thread) {
       const found: FeishuMessage[] = [];
       for await (const message of pages({ container_id_type: 'thread', container_id: thread })) found.push(message);

@@ -48,6 +48,10 @@ export class FakeLark implements Lark {
       if (seconds >= start && seconds <= end) yield m;
     }
   }
+  async recent(_chat: string, end: number, count: number) {
+    if (this.failWith) throw this.failWith;
+    return this.messages.filter(m => Math.floor(Number(m.create_time) / 1000) <= end).sort((a, b) => Number(a.create_time) - Number(b.create_time)).slice(-count);
+  }
   async thread(thread: string) { return this.threads.get(thread) ?? []; }
   /** A message by id: a forward with what it carries, or any message of the group (a reply's parent from an earlier reading). */
   async message(id: string) { return this.forwards.get(id) ?? [...this.messages, ...[...this.threads.values()].flat()].filter(m => m.message_id === id); }

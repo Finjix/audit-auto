@@ -73,7 +73,7 @@ function setup() {
   const shared = path.join(tempDir('host-'), 'audit-auto');
   const lark = new FakeLark();
   lark.messages.push(
-    message(NOW - 200 * DAY, { text: '很久以前：BOSS 可以写' }),
+    message(NOW - 400 * DAY, { text: '很久以前：BOSS 可以写' }),
     message(NOW - 3 * DAY, { text: '这条被巨量拒了，理由是「上头」算防沉迷' }),
     message(NOW - 3 * DAY + 60_000, { text: '以后「上头」都别写了' }, { from: 'ou_bob' }),
     message(NOW - 3 * DAY + 90_000, { text: '审片结果：……' }, { from: 'cli_bot', type: 'interactive' }),
@@ -83,7 +83,7 @@ function setup() {
   return { shared, lark };
 }
 
-test('listening to a group: refused outside a group; the history of 180 days is read, rulings become rules, progress is kept', async () => {
+test('listening to a group: refused outside a group; the last year is read, rulings become rules, progress is kept', async () => {
   const { shared, lark } = setup();
   const model = new FakeModel(() => ({ operations: [{ op: 'add', category: '字幕和口播', rule: '「上头」算防沉迷，字幕口播都不能写', fix: '换个说法', messages: [1, 2] }] }));
   const ctx = { lark, model, root, shared, log: () => {}, now: () => NOW };
@@ -92,8 +92,8 @@ test('listening to a group: refused outside a group; the history of 180 days is 
   await assert.rejects(watch(PROJECTS.GOF, undefined, { chat: 'oc_x' }, ctx), /看不出这里是不是群聊/);
 
   const result = await watch(PROJECTS.GOF, undefined, group, ctx);
-  assert.deepEqual({ ...result }, { status: 'watching', project: 'GOF', read: 4, considered: 3, added: 1, updated: 0, removed: 0, pending: false, already: false, since: '2026-05-06', rules: 1 });
-  assert.equal(lark.asked[0]!.start, Math.floor((NOW - 180 * DAY) / 1000));
+  assert.deepEqual({ ...result }, { status: 'watching', project: 'GOF', read: 4, considered: 3, added: 1, updated: 0, removed: 0, pending: false, already: false, since: '2025-11-02', rules: 1 });
+  assert.equal(lark.asked[0]!.start, Math.floor((NOW - 365 * DAY) / 1000));
   assert.equal(model.calls.length, 1);
   const [call] = model.calls;
   const transcript = textOf(call!);
@@ -102,7 +102,7 @@ test('listening to a group: refused outside a group; the history of 180 days is 
   assert.equal(call!.parts.at(-1)!.inlineData!.mimeType, 'image/png', 'the picture goes with the transcript');
   assert.match(call!.system, /Today is 2026-11-02/);
   assert.match(call!.system, /# Fixed spec\n# GOF（无尽冬日）/);
-  assert.match(call!.system, /# Dynamic spec now\n\(empty\)/);
+  assert.match(call!.system, /# Dynamic spec now\nEach rule .*\n\(empty\)/);
 
   const book = loadBook(shared, 'GOF');
   assert.deepEqual(book.rules.map(r => [r.id, r.rule, r.sources.map(s => s.by)]), [['D1', '「上头」算防沉迷，字幕口播都不能写', ['王审核', '李剪辑']]]);
@@ -114,14 +114,22 @@ test('listening to a group: refused outside a group; the history of 180 days is 
 
   // Then at the next sync: only what is new is read, and it may change the rules made before.
   lark.messages.push(message(NOW + 60_000, { text: '更正：「上头」在剧情台词里也不行，另外 BOSS 可以写成首领' }, { parent_id: lark.messages[1]!.message_id }));
-  model.answer = () => ({ operations: [{ op: 'update', id: 'D1', rule: '「上头」算防沉迷，字幕、口播、剧情台词都不能写', messages: ['#2'] }, { op: 'add', category: '字幕和口播', rule: 'BOSS 写成首领', messages: [2] }] });
+  model.answer = () => ({ operations: [
+    { op: 'update', id: 'D1', rule: '「上头」算防沉迷，字幕、口播、剧情台词都不能写', messages: ['#4', 1] }, { op: 'add', category: '字幕和口播', rule: 'BOSS 写成首领', messages: [4] },
+    { op: 'add', rule: '截图里的东西不能用', messages: [3] },
+  ] });
   const hourly = await syncAll({ ...ctx, now: () => NOW + 3_600_000 });
   assert.deepEqual(hourly.groups, [{ chat: 'oc_review', project: 'GOF', read: 1, considered: 1, added: 1, updated: 1, removed: 0, pending: false }]);
   const second = textOf(model.calls[1]!);
-  // The message it replies to was read an hour ago: it comes along, so that the reply makes sense.
-  assert.match(second, /^New messages from the review group \(1\), with 1 earlier ones they reply to \(marked 之前的消息\):\n\n#1 \[2026-10-30 16:00\] 王审核（之前的消息）: 这条被巨量拒了，理由是「上头」算防沉迷\n#2 \[2026-11-02 16:01\] 王审核（回复 #1）: 更正/);
-  assert.match(model.calls[1]!.system, /- D1〔字幕和口播〕「上头」算防沉迷，字幕口播都不能写 怎么改：换个说法（2026-11-02）/);
+  // The messages read before come along (the one it replies to among them), so that the new one makes sense; their pictures stay behind.
+  assert.match(second, /^New messages from the review group \(1\), with 3 from earlier readings \(marked 之前的消息\):\n\n#1 \[2026-10-30 16:00\] 王审核（之前的消息）: 这条被巨量拒了，理由是「上头」算防沉迷\n#2 \[2026-10-30 16:01\] 李剪辑（之前的消息）: 以后「上头」都别写了\n#3 \[2026-10-31 16:00\] 王审核（之前的消息）: \[图片\]\n#4 \[2026-11-02 16:01\] 王审核（回复 #1）: 更正/);
+  assert.doesNotMatch(second, /审片结果/);
+  assert.ok(!model.calls[1]!.parts.some(p => p.inlineData), 'no pictures from before');
+  // The rules come with the words they rest on.
+  assert.match(model.calls[1]!.system, /- D1〔字幕和口播〕「上头」算防沉迷，字幕口播都不能写 怎么改：换个说法（2026-11-02；依据：王审核「这条被巨量拒了，理由是「上头」算防沉迷」；李剪辑「以后「上头」都别写了」）/);
+  // An operation that rests only on what was read before is not taken: its ruling is in the spec already.
   assert.deepEqual(loadBook(shared, 'GOF').rules.map(r => r.rule), ['「上头」算防沉迷，字幕、口播、剧情台词都不能写', 'BOSS 写成首领']);
+  assert.deepEqual(loadBook(shared, 'GOF').rules[1]!.sources.map(s => s.text), ['更正：「上头」在剧情台词里也不行，另外 BOSS 可以写成首领']);
   // Nothing new: nobody is asked.
   await syncAll({ ...ctx, now: () => NOW + 7_200_000 });
   assert.equal(model.calls.length, 2);
@@ -144,7 +152,7 @@ test('the command line: watch, status, show, remove and unwatch, as the host run
   const watched = await run('rules', 'watch', '--project', 'GOF', '--since', '2026-10-29');
   assert.equal(watched.code, 0);
   assert.equal(watched.result.since, '2026-10-29');
-  assert.equal(watched.result.read, 4, 'from the date given, not the 180 days');
+  assert.equal(watched.result.read, 4, 'from the date given, not the last year');
 
   const status = (await run('rules', 'status')).result;
   assert.equal(status.here, 'GOF');
