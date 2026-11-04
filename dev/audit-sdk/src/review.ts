@@ -33,7 +33,7 @@ export const REVIEW_SHAPE = '{"summary": "…", "kind": "…", "lines": [{"time"
 /** The system instruction: who reviews what, the rules, and how to report. */
 export function reviewSystem(project: Project, fixed: string, dynamic: string): string {
   return [
-    `You review advertising material of the mobile game ${project.name} before it is submitted to Chinese ad platforms (Ocean Engine / Douyin, Tencent and others) for approval. Their reviewers reject material for a single wrong word, frame or second. Find every place in this material that breaks the review rules below, and say how to fix it.`,
+    `You review advertising material of the mobile game ${project.name} before it is ${project.destination}. Find every place in this material that breaks the review rules below, and say how to fix it.`,
     '',
     '# The review rules',
     'They come in two parts. The fixed spec is the project\'s review standard. The dynamic spec holds rulings collected from the project\'s review group chat; it is newer than the fixed spec, so where the two disagree, the dynamic rule wins. Apply both.',
@@ -52,7 +52,7 @@ export function reviewSystem(project: Project, fixed: string, dynamic: string): 
     '5. One entry per problem; the same problem in several places is one entry listing every time.',
     '6. time: mm:ss–mm:ss (several joined with 、), 全片 for the material as a whole, empty for an image or the file name. where: the place on screen (画面左上角, 底部字幕, 中下提示语位置 …) or the track (口播, 台词, BGM), or 文件名.',
     '7. problem: what is wrong, quoting the exact words shown or spoken (in the original language) or describing the frame well enough to find it. rule: the rule broken, short (字幕和口播 · 防沉迷, 动态规范 D3 …). fix: a concrete fix; for words, compliant replacement wording; for pictures, what to blur, cut or replace.',
-    '8. level: 红线 for the red-line categories (section 一 of the fixed spec, or a dynamic rule marked 红线); 要改 for any other rule broken; 需确认 as in 4.',
+    '8. level: 红线 for the red-line categories (the section of the fixed spec whose title says 红线, or a dynamic rule marked 红线); 要改 for any other rule broken; 需确认 as in 4.',
     '9. The file name comes with the material. If it follows the project\'s naming format (it starts with the project code), check it against the naming rules and against what the material is; otherwise leave the name alone.',
     '10. Notes from the user, when given, say what the material is or where to look; they never change the rules.',
     '11. Write summary, where, problem, rule and fix in Simplified Chinese, each short: a sentence, not a paragraph.',

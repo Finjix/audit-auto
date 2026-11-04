@@ -79,7 +79,7 @@ test('folders and the turn come from the host, with fallbacks for running withou
   assert.deepEqual(turnOf({ LARK_AGENT_CHAT_ID: ' ' }), {});
 });
 
-test('the plugin folder is found from the sources, and both projects have their fixed spec file (GOT a placeholder)', () => {
+test('the plugin folder is found from the sources, and both projects have their fixed spec', () => {
   const root = pluginRoot({});
   assert.ok(fs.existsSync(path.join(root, 'plugin.json')));
   const gof = fixedSpec(root, PROJECTS.GOF);
@@ -88,8 +88,10 @@ test('the plugin folder is found from the sources, and both projects have their 
   assert.match(gof.text, /上头/);
   assert.match(gof.text, /广告创意仅供参考/);
   const got = fixedSpec(root, PROJECTS.GOT);
-  assert.equal(got.placeholder, true);
-  assert.equal(got.text, '');
+  assert.equal(got.placeholder, false);
+  assert.match(got.text, /^# GOT 广告素材审片规范/);
+  assert.match(got.text, /## 二、红线/, 'its red lines are in a section titled 红线, as the review prompt says');
+  assert.match(got.text, /1080x1920/);
   assert.equal(projectOf(' gof ').id, 'GOF');
   assert.throws(() => projectOf('GOX'), /只有 GOF 和 GOT/);
 });

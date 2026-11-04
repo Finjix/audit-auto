@@ -27,6 +27,6 @@ test('info tells what is configured, never the key', async () => {
   assert.equal(code, 0);
   assert.equal(result.model, 'gemini-3.8-flash (thinking medium) @ https://lumos.diandian.info/winky/gemini/v1');
   assert.equal(result.shared, path.join(path.resolve(shared), 'audit-auto'));
-  assert.deepEqual(result.projects, [{ id: 'GOF', fixed_spec: true, dynamic_rules: 0 }, { id: 'GOT', fixed_spec: false, dynamic_rules: 0 }]);
+  assert.deepEqual(result.projects, [{ id: 'GOF', fixed_spec: true, dynamic_rules: 0 }, { id: 'GOT', fixed_spec: true, dynamic_rules: 0 }]);
   assert.doesNotMatch(JSON.stringify(result), /sk-secret-key/);
 });

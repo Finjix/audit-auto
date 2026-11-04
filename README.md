@@ -7,7 +7,7 @@ AI 审片插件（Codex 插件，给 [lark-agent](https://github.com/Finjix/lark
 | 技能 | 做什么 |
 |---|---|
 | `gof-audit` | GOF（无尽冬日）审片。固定规范在 `skills/gof-audit/references/rules.md`，取自《无尽冬日 广告素材审核标准（2026-10 版）》 |
-| `got-audit` | GOT 审片。固定规范还没有，`rules.md` 是占位，只用动态规范；动态规范也是空的时候拒绝审，并告诉用户先去审核群开始监听 |
+| `got-audit` | GOT 审片。固定规范在 `skills/got-audit/references/rules.md`，取自《GOT 广告素材审核规则（初版 V0.3）》 |
 | `dynamic-rules` | 动态规范。在业务群里 @机器人「监听本群更新审片规范」，机器人读群里最近一年的聊天，把审核结论整理成该项目的动态规范；之后每天读一次新消息，新增、修改或撤回规范。也能停止（取消）监听、立即更新、查看规范、列出监听的群、删错的规则 |
 
 审片时固定规范和动态规范一起用，两者冲突时以动态规范为准（更新）。
@@ -21,7 +21,7 @@ plugins/audit-auto/                  插件本体，安装和打包的就是这�
   lark-agent.json                    lark-agent 的定时任务：每天（1440 分钟）rules sync
   server/dist/audit.mjs              命令行的打包产物（含 Google Gen AI SDK，提交入库，装好即用）
   skills/gof-audit/                  技能 + references/rules.md（GOF 固定规范）
-  skills/got-audit/                  技能 + references/rules.md（占位）
+  skills/got-audit/                  技能 + references/rules.md（GOT 固定规范）
   skills/dynamic-rules/              技能
 dev/                                 开发专用，不进入发布包
   audit-sdk/                         TypeScript 源码、esbuild 脚本、测试
@@ -97,7 +97,8 @@ docs/lark-agent-integration.md       放进 lark-agent
 ## 规范怎么维护
 
 - **GOF 固定规范**：`skills/gof-audit/references/rules.md`，从飞书文档整理（内容照原文逐条列出；原文的示例图片没带过来，上传送审流程看素材查不了没收录；第六节加了一条「审片不查编号大小」）。标准出新版就照新版改这个文件，重新打包、部署。
-- **GOT 固定规范**：`skills/got-audit/references/rules.md` 第一行是 `<!-- audit-auto: placeholder -->`，有这行就只用动态规范。定下来以后删掉这行，照 GOF 的写法写规范。
+- **GOT 固定规范**：`skills/got-audit/references/rules.md`，从飞书文档《GOT 广告素材审核规则（初版 V0.3）》整理（内容照原文逐条列出；送审流程、共享盘和 CLS 上传看素材查不了没收录，自查清单是前面的汇总也没收录；第一节加了一条「审片时看不到策划方案」）。规则出新版就照新版改，重新打包、部署。
+- **占位**：哪个项目的 `rules.md` 第一行是 `<!-- audit-auto: placeholder -->`，它就没有固定规范、只用动态规范；动态规范也是空的时候拒绝审，并告诉用户先去审核群开始监听。
 - **动态规范**：靠群里的聊天。规则错了，在群里说清楚（下一次每天的读取时更新，或 @机器人「现在更新一下规范」），或让机器人删掉（`rules remove`）。
 
 ## 安装

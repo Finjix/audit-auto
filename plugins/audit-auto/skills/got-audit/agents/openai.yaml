@@ -1,6 +1,6 @@
 interface:
   display_name: "GOT 审片"
-  short_description: "按 GOT 的审片规范（目前只有审核群整理的动态规范）审广告视频、图片，逐条给出位置 / 问题 / 怎么改"
+  short_description: "按 GOT 的审片规范（固定规范加审核群整理的动态规范）审广告视频、图片，逐条给出位置 / 问题 / 怎么改"
   default_prompt: "Use $got-audit to review this GOT ad video and list every problem with 位置 / 问题 / 怎么改."
 policy:
   allow_implicit_invocation: true

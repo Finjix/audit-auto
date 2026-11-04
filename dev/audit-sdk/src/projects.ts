@@ -8,11 +8,18 @@ import { Blocked } from './errors.ts';
  * placeholder: its file starts with PLACEHOLDER, and the project is reviewed against its dynamic spec alone.
  */
 
-export interface Project { id: 'GOF' | 'GOT'; name: string; skill: string }
+/** `destination`: where the material goes, as the review prompt says it ("before it is …"). */
+export interface Project { id: 'GOF' | 'GOT'; name: string; skill: string; destination: string }
 
 export const PROJECTS: Record<Project['id'], Project> = {
-  GOF: { id: 'GOF', name: 'GOF（无尽冬日）', skill: 'gof-audit' },
-  GOT: { id: 'GOT', name: 'GOT', skill: 'got-audit' },
+  GOF: {
+    id: 'GOF', name: 'GOF（无尽冬日）', skill: 'gof-audit',
+    destination: 'submitted to Chinese ad platforms (Ocean Engine / Douyin, Tencent and others) for approval. Their reviewers reject material for a single wrong word, frame or second',
+  },
+  GOT: {
+    id: 'GOT', name: 'GOT', skill: 'got-audit',
+    destination: 'delivered for advertising. Its markets and ad platforms are not settled yet, so apply the rules below and no single platform\'s own list; besides the red lines, the rules ask that viewers can follow the gameplay in the finished video',
+  },
 };
 
 export const PLACEHOLDER = '<!-- audit-auto: placeholder -->';

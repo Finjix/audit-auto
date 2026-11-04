@@ -5,7 +5,7 @@ import path from 'node:path';
 import { main } from '../src/cli.ts';
 import { pluginRoot } from '../src/config.ts';
 import { Blocked } from '../src/errors.ts';
-import { PROJECTS } from '../src/projects.ts';
+import { PLACEHOLDER, PROJECTS } from '../src/projects.ts';
 import { normalize, renderFile, review, reviewSystem, verdictOf, type FileResult } from '../src/review.ts';
 import { saveBook, type Book } from '../src/rules.ts';
 import { FakeModel, textOf } from './helpers/fakes.ts';
@@ -73,7 +73,12 @@ test('the system instruction carries the fixed spec and the dynamic spec, the dy
   assert.match(system, /## Fixed spec\n# 固定\n- 不写上头/);
   assert.match(system, /## Dynamic spec\n- D1〔字幕和口播〕「赚米」不能用/);
   assert.match(system, /the dynamic rule wins/);
-  assert.match(reviewSystem(PROJECTS.GOT, '', ''), /no fixed spec yet[\s\S]*No dynamic rules yet/);
+  assert.match(system, /Chinese ad platforms/);
+  assert.match(system, /the section of the fixed spec whose title says 红线/);
+  const got = reviewSystem(PROJECTS.GOT, '', '');
+  assert.match(got, /no fixed spec yet[\s\S]*No dynamic rules yet/);
+  assert.match(got, /not settled yet/);
+  assert.doesNotMatch(got, /Chinese ad platforms/, 'GOT material is not said to go to Chinese platforms');
 });
 
 test('a GOF review sends each video inline with the GOF spec, at the frame rate its length calls for, and renders every file', async () => {
@@ -98,20 +103,41 @@ test('a GOF review sends each video inline with the GOF spec, at the frame rate 
   assert.deepEqual(outcome.rules, { fixed: true, dynamic: 0 });
 });
 
-test('GOT has only its dynamic spec: with none the review is refused with what to do, with rules it uses them alone', async () => {
+test('GOT is reviewed against its fixed spec and its dynamic spec', async () => {
   const dir = tempDir('input-');
   const shared = tempDir('shared-');
   const model = new FakeModel(() => ANSWER);
-  await assert.rejects(review(PROJECTS.GOT, [video(dir, 'got.mp4')], undefined, context(model, shared)), /监听本群更新审片规范/);
-  assert.equal(model.calls.length, 0);
+  const plain = await review(PROJECTS.GOT, [video(dir, 'got.mp4')], undefined, context(model, shared));
+  assert.equal(plain.results[0]!.status, 'reviewed');
+  assert.match(model.calls[0]!.system, /## Fixed spec\n# GOT 广告素材审片规范/);
+  assert.match(model.calls[0]!.system, /No dynamic rules yet/);
+  assert.deepEqual(plain.rules, { fixed: true, dynamic: 0 });
   const book: Book = { version: 1, project: 'GOT', next: 2, removed: [], updated: 1, rules: [
     { id: 'D1', category: '字幕和口播', rule: '「通关」不能写成「通guan」', fix: '写汉字', sources: [{ chat: 'oc_1', message: 'om_1', at: Date.parse('2026-10-30T06:00:00Z') }], created: 1, updated: Date.parse('2026-10-30T06:00:00Z') },
   ] };
   saveBook(shared, book);
   const outcome = await review(PROJECTS.GOT, [video(dir, 'got.mp4')], undefined, context(model, shared));
+  assert.match(model.calls[1]!.system, /- D1〔字幕和口播〕「通关」不能写成「通guan」 怎么改：写汉字（2026-10-30）/);
+  assert.deepEqual(outcome.rules, { fixed: true, dynamic: 1 });
+});
+
+test('a project whose fixed spec is a placeholder uses its dynamic spec alone, and with none the review is refused with what to do', async () => {
+  const placeholder = tempDir('plugin-');
+  fs.mkdirSync(path.join(placeholder, 'skills', 'got-audit', 'references'), { recursive: true });
+  fs.writeFileSync(path.join(placeholder, 'skills', 'got-audit', 'references', 'rules.md'), [PLACEHOLDER, '<!-- 还没定 -->', '', '# GOT 广告素材审片规范', '', '还没有固定规范。', ''].join('\n'));
+  const dir = tempDir('input-');
+  const shared = tempDir('shared-');
+  const model = new FakeModel(() => ANSWER);
+  const ctx = () => ({ ...context(model, shared), root: placeholder });
+  await assert.rejects(review(PROJECTS.GOT, [video(dir, 'got.mp4')], undefined, ctx()), /监听本群更新审片规范/);
+  assert.equal(model.calls.length, 0);
+  saveBook(shared, { version: 1, project: 'GOT', next: 2, removed: [], updated: 1, rules: [
+    { id: 'D1', category: '字幕和口播', rule: '「通关」不能写成「通guan」', sources: [{ chat: 'oc_1', message: 'om_1', at: 1 }], created: 1, updated: 1 },
+  ] });
+  const outcome = await review(PROJECTS.GOT, [video(dir, 'got.mp4')], undefined, ctx());
   assert.equal(outcome.results[0]!.status, 'reviewed');
   assert.match(model.calls[0]!.system, /no fixed spec yet/);
-  assert.match(model.calls[0]!.system, /- D1〔字幕和口播〕「通关」不能写成「通guan」 怎么改：写汉字（2026-10-30）/);
+  assert.doesNotMatch(model.calls[0]!.system, /还没有固定规范/);
   assert.deepEqual(outcome.rules, { fixed: false, dynamic: 1 });
 });
 
